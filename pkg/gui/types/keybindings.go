@@ -43,6 +43,9 @@ type Binding struct {
 	// to be displayed if the keybinding is highlighted from within a menu
 	Tooltip string
 
+	// If true, this binding is hidden from the bottom bar in staging mode
+	DisabledInStagingMode bool
+
 	// Function to decide whether the command is enabled, and why. If this
 	// returns an empty string, it is; if it returns a non-empty string, it is
 	// disabled and we show the given text in an error message when trying to
@@ -77,8 +80,9 @@ func (b *Binding) GetShortDescription() string {
 type Guard func(func() error) func() error
 
 type KeybindingGuards struct {
-	OutsideFilterMode Guard
-	NoPopupPanel      Guard
+	OutsideFilterMode  Guard
+	OutsideStagingMode Guard
+	NoPopupPanel       Guard
 }
 
 type ErrKeybindingNotHandled struct {

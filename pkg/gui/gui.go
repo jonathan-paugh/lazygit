@@ -31,6 +31,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/diffing"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/filtering"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/marked_base_commit"
+	"github.com/jesseduffield/lazygit/pkg/gui/modes/staging_mode"
 	"github.com/jesseduffield/lazygit/pkg/gui/popup"
 	"github.com/jesseduffield/lazygit/pkg/gui/presentation"
 	"github.com/jesseduffield/lazygit/pkg/gui/presentation/authors"
@@ -101,6 +102,9 @@ type Gui struct {
 
 	// this tells us whether our views have been initially set up
 	ViewsSetup bool
+
+	// whether staging mode is active (set from --mode=staging CLI arg)
+	InStagingMode bool
 
 	Views types.Views
 
@@ -587,6 +591,7 @@ func (gui *Gui) resetState(startArgs appTypes.StartArgs) types.Context {
 			CherryPicking:    cherrypicking.New(),
 			Diffing:          diffing.New(),
 			MarkedBaseCommit: marked_base_commit.New(),
+			StagingMode:      staging_mode.New(startArgs.Mode == appTypes.ModeStagingValue),
 		},
 		ScreenMode: initialScreenMode,
 		// TODO: only use contexts from context manager
@@ -811,27 +816,39 @@ func (gui *Gui) viewTabMap() map[string][]context.TabView {
 				ViewName: "reflogCommits",
 			},
 		},
-		"files": {
-			{
-				Tab:      gui.c.Tr.FilesTitle,
-				ViewName: "files",
-			},
-			context.TabView{
-				Tab:      gui.c.Tr.WorktreesTitle,
-				ViewName: "worktrees",
-			},
-			{
-				Tab:      gui.c.Tr.SubmodulesTitle,
-				ViewName: "submodules",
-			},
-		},
+		"files": gui.filesTabViews(),
 	}
 
 	return result
 }
 
+func (gui *Gui) filesTabViews() []context.TabView {
+	filesTab := context.TabView{
+		Tab:      gui.c.Tr.FilesTitle,
+		ViewName: "files",
+	}
+
+	if gui.InStagingMode {
+		return []context.TabView{filesTab}
+	}
+
+	return []context.TabView{
+		filesTab,
+		{
+			Tab:      gui.c.Tr.WorktreesTitle,
+			ViewName: "worktrees",
+		},
+		{
+			Tab:      gui.c.Tr.SubmodulesTitle,
+			ViewName: "submodules",
+		},
+	}
+}
+
 // Run: setup the gui with keybindings and start the mainloop
 func (gui *Gui) Run(startArgs appTypes.StartArgs) error {
+	gui.InStagingMode = startArgs.Mode == appTypes.ModeStagingValue
+
 	g, err := gui.initGocui(Headless(), startArgs.IntegrationTest)
 	if err != nil {
 		return err

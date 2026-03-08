@@ -48,8 +48,16 @@ func (self *OptionsMapMgr) renderContextOptionsMap() {
 		return !currentContextKeys.Includes(b.Key)
 	})...)
 
+	inStagingMode := self.c.Modes().StagingMode.Active()
+
 	bindingsToDisplay := lo.Filter(allBindings, func(binding *types.Binding, _ int) bool {
-		return binding.DisplayOnScreen && !binding.IsDisabled()
+		if !binding.DisplayOnScreen || binding.IsDisabled() {
+			return false
+		}
+		if inStagingMode && binding.DisabledInStagingMode {
+			return false
+		}
+		return true
 	})
 
 	optionsMap := lo.Map(bindingsToDisplay, func(binding *types.Binding, _ int) bindingInfo {

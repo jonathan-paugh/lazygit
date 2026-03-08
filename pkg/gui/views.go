@@ -221,22 +221,27 @@ func (gui *Gui) configureViewProperties() {
 			return keyToTitlePrefix(binding)
 		})
 
-		gui.Views.Status.TitlePrefix = jumpLabels[0]
+		if gui.InStagingMode {
+			gui.Views.Files.TitlePrefix = jumpLabels[0]
+		} else {
+			gui.Views.Status.TitlePrefix = jumpLabels[0]
 
-		gui.Views.Files.TitlePrefix = jumpLabels[1]
-		gui.Views.Worktrees.TitlePrefix = jumpLabels[1]
-		gui.Views.Submodules.TitlePrefix = jumpLabels[1]
+			gui.Views.Files.TitlePrefix = jumpLabels[1]
+			gui.Views.Worktrees.TitlePrefix = jumpLabels[1]
+			gui.Views.Submodules.TitlePrefix = jumpLabels[1]
 
-		gui.Views.Branches.TitlePrefix = jumpLabels[2]
-		gui.Views.Remotes.TitlePrefix = jumpLabels[2]
-		gui.Views.Tags.TitlePrefix = jumpLabels[2]
+			gui.Views.Branches.TitlePrefix = jumpLabels[2]
+			gui.Views.Remotes.TitlePrefix = jumpLabels[2]
+			gui.Views.Tags.TitlePrefix = jumpLabels[2]
 
-		gui.Views.Commits.TitlePrefix = jumpLabels[3]
-		gui.Views.ReflogCommits.TitlePrefix = jumpLabels[3]
+			gui.Views.Commits.TitlePrefix = jumpLabels[3]
+			gui.Views.ReflogCommits.TitlePrefix = jumpLabels[3]
 
-		gui.Views.Stash.TitlePrefix = jumpLabels[4]
+			gui.Views.Stash.TitlePrefix = jumpLabels[4]
+		}
 
 		gui.Views.Main.TitlePrefix = keyToTitlePrefix(gui.c.UserConfig().Keybinding.Universal.FocusMainView)
+		gui.Views.Extras.TitlePrefix = keyToTitlePrefix(gui.c.UserConfig().Keybinding.Universal.ExtrasMenu)
 	} else {
 		gui.Views.Status.TitlePrefix = ""
 
@@ -254,6 +259,7 @@ func (gui *Gui) configureViewProperties() {
 		gui.Views.Stash.TitlePrefix = ""
 
 		gui.Views.Main.TitlePrefix = ""
+		gui.Views.Extras.TitlePrefix = ""
 	}
 
 	for _, view := range gui.g.Views() {

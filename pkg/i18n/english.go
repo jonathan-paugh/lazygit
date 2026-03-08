@@ -653,6 +653,7 @@ type TranslationSet struct {
 	WillCancelExistingFilterTooltip       string
 	MustExitFilterModeTitle               string
 	MustExitFilterModePrompt              string
+	StagingModeRestriction                string
 	Diff                                  string
 	EnterRefToDiff                        string
 	EnterRefName                          string
@@ -1769,6 +1770,7 @@ func EnglishTranslationSet() *TranslationSet {
 		WillCancelExistingFilterTooltip:  "Note: this will cancel the existing filter",
 		MustExitFilterModeTitle:          "Command not available",
 		MustExitFilterModePrompt:         "Command not available in filter-by-path mode. Exit filter-by-path mode?",
+		StagingModeRestriction:           "Not available in staging mode",
 		Diff:                             "Diff",
 		EnterRefToDiff:                   "Enter ref to diff",
 		EnterRefName:                     "Enter ref:",

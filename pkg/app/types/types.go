@@ -14,6 +14,8 @@ type StartArgs struct {
 	FilterPath string
 	// ScreenMode determines the initial Screen Mode (normal, half or full) to use
 	ScreenMode string
+	// Mode determines the operating mode (e.g. "staging" for restricted staging-only mode)
+	Mode string
 }
 
 type GitArg string
@@ -26,11 +28,14 @@ const (
 	GitArgStash  GitArg = "stash"
 )
 
-func NewStartArgs(filterPath string, gitArg GitArg, screenMode string, test integrationTypes.IntegrationTest) StartArgs {
+const ModeStagingValue = "staging"
+
+func NewStartArgs(filterPath string, gitArg GitArg, screenMode string, mode string, test integrationTypes.IntegrationTest) StartArgs {
 	return StartArgs{
 		FilterPath:      filterPath,
 		GitArg:          gitArg,
 		ScreenMode:      screenMode,
+		Mode:            mode,
 		IntegrationTest: test,
 	}
 }

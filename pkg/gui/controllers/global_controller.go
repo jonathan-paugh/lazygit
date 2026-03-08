@@ -25,20 +25,20 @@ func (self *GlobalController) GetKeybindings(opts types.KeybindingsOpts) []*type
 	return []*types.Binding{
 		{
 			Key:         opts.GetKey(opts.Config.Universal.ExecuteShellCommand),
-			Handler:     self.shellCommand,
+			Handler:     opts.Guards.OutsideStagingMode(self.shellCommand),
 			Description: self.c.Tr.ExecuteShellCommand,
 			Tooltip:     self.c.Tr.ExecuteShellCommandTooltip,
 			OpensMenu:   true,
 		},
 		{
 			Key:         opts.GetKey(opts.Config.Universal.CreatePatchOptionsMenu),
-			Handler:     self.createCustomPatchOptionsMenu,
+			Handler:     opts.Guards.OutsideStagingMode(self.createCustomPatchOptionsMenu),
 			Description: self.c.Tr.ViewPatchOptions,
 			OpensMenu:   true,
 		},
 		{
 			Key:               opts.GetKey(opts.Config.Universal.CreateRebaseOptionsMenu),
-			Handler:           opts.Guards.NoPopupPanel(self.c.Helpers().MergeAndRebase.CreateRebaseOptionsMenu),
+			Handler:           opts.Guards.OutsideStagingMode(opts.Guards.NoPopupPanel(self.c.Helpers().MergeAndRebase.CreateRebaseOptionsMenu)),
 			Description:       self.c.Tr.ViewMergeRebaseOptions,
 			Tooltip:           self.c.Tr.ViewMergeRebaseOptionsTooltip,
 			OpensMenu:         true,

@@ -35,6 +35,7 @@ type cliArgs struct {
 	GitDir             string
 	CustomConfigFile   string
 	ScreenMode         string
+	Mode               string
 	PrintVersionInfo   bool
 	Debug              bool
 	TailLogs           bool
@@ -174,7 +175,7 @@ func Start(buildInfo *BuildInfo, integrationTest integrationTypes.IntegrationTes
 
 	parsedGitArg := parseGitArg(cliArgs.GitArg)
 
-	Run(appConfig, common, appTypes.NewStartArgs(cliArgs.FilterPath, parsedGitArg, cliArgs.ScreenMode, integrationTest))
+	Run(appConfig, common, appTypes.NewStartArgs(cliArgs.FilterPath, parsedGitArg, cliArgs.ScreenMode, cliArgs.Mode, integrationTest))
 }
 
 func parseCliArgsAndEnvVars() *cliArgs {
@@ -222,6 +223,9 @@ func parseCliArgsAndEnvVars() *cliArgs {
 	screenMode := ""
 	flaggy.String(&screenMode, "sm", "screen-mode", "The initial screen-mode, which determines the size of the focused panel. Valid options: 'normal' (default), 'half', 'full'")
 
+	mode := ""
+	flaggy.String(&mode, "md", "mode", "Operating mode. Valid options: 'staging' (restricted to staging/unstaging only)")
+
 	flaggy.Parse()
 
 	if os.Getenv("DEBUG") == "TRUE" {
@@ -243,6 +247,7 @@ func parseCliArgsAndEnvVars() *cliArgs {
 		GitDir:             gitDir,
 		CustomConfigFile:   customConfigFile,
 		ScreenMode:         screenMode,
+		Mode:               mode,
 	}
 }
 

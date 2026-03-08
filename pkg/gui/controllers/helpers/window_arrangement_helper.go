@@ -68,6 +68,8 @@ type WindowArrangementArgs struct {
 	InDemo bool
 	// Whether any mode is active (e.g. rebasing, cherry picking, etc)
 	IsAnyModeActive bool
+	// Whether staging mode is active (restricted to staging/unstaging only)
+	InStagingMode bool
 	// Whether the search prompt is shown in the bottom left
 	InSearchPrompt bool
 	// One of '' (not searching), 'Search: ', and 'Filter: '
@@ -98,6 +100,7 @@ func (self *WindowArrangementHelper) GetWindowDimensions(informationStr string, 
 		ShowExtrasWindow:  self.c.State().GetShowExtrasWindow(),
 		InDemo:            self.c.InDemo(),
 		IsAnyModeActive:   self.modeHelper.IsAnyModeActive(),
+		InStagingMode:     self.c.Modes().StagingMode.Active(),
 		InSearchPrompt:    repoState.InSearchPrompt(),
 		SearchPrefix:      searchPrefix,
 	}
@@ -420,6 +423,16 @@ func getDefaultStashWindowBox(args WindowArrangementArgs) *boxlayout.Box {
 
 func sidePanelChildren(args WindowArrangementArgs) func(width int, height int) []*boxlayout.Box {
 	return func(width int, height int) []*boxlayout.Box {
+		if args.InStagingMode {
+			return []*boxlayout.Box{
+				{Window: "status", Size: 0},
+				{Window: "files", Weight: 1},
+				{Window: "branches", Size: 0},
+				{Window: "commits", Size: 0},
+				{Window: "stash", Size: 0},
+			}
+		}
+
 		if args.ScreenMode == types.SCREEN_FULL || args.ScreenMode == types.SCREEN_HALF {
 			fullHeightBox := func(window string) *boxlayout.Box {
 				if window == args.CurrentSideWindow {
