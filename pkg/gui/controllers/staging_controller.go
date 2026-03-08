@@ -89,23 +89,23 @@ func (self *StagingController) GetKeybindings(opts types.KeybindingsOpts) []*typ
 		},
 		{
 			Key:         opts.GetKey(opts.Config.Files.CommitChanges),
-			Handler:     self.c.Helpers().WorkingTree.HandleCommitPress,
+			Handler:     opts.Guards.OutsideStagingMode(self.c.Helpers().WorkingTree.HandleCommitPress),
 			Description: self.c.Tr.Commit,
 			Tooltip:     self.c.Tr.CommitTooltip,
 		},
 		{
 			Key:         opts.GetKey(opts.Config.Files.CommitChangesWithoutHook),
-			Handler:     self.c.Helpers().WorkingTree.HandleWIPCommitPress,
+			Handler:     opts.Guards.OutsideStagingMode(self.c.Helpers().WorkingTree.HandleWIPCommitPress),
 			Description: self.c.Tr.CommitChangesWithoutHook,
 		},
 		{
 			Key:         opts.GetKey(opts.Config.Files.CommitChangesWithEditor),
-			Handler:     self.c.Helpers().WorkingTree.HandleCommitEditorPress,
+			Handler:     opts.Guards.OutsideStagingMode(self.c.Helpers().WorkingTree.HandleCommitEditorPress),
 			Description: self.c.Tr.CommitChangesWithEditor,
 		},
 		{
 			Key:         opts.GetKey(opts.Config.Files.FindBaseCommitForFixup),
-			Handler:     self.c.Helpers().FixupHelper.HandleFindBaseCommitForFixupPress,
+			Handler:     opts.Guards.OutsideStagingMode(self.c.Helpers().FixupHelper.HandleFindBaseCommitForFixupPress),
 			Description: self.c.Tr.FindBaseCommitForFixup,
 			Tooltip:     self.c.Tr.FindBaseCommitForFixupTooltip,
 		},

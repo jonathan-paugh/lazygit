@@ -21,6 +21,17 @@ func (gui *Gui) noPopupPanel(f func() error) func() error {
 	}
 }
 
+func (gui *Gui) outsideStagingMode(f func() error) func() error {
+	return func() error {
+		if gui.State.Modes.StagingMode.Active() {
+			gui.c.ErrorToast(gui.c.Tr.StagingModeRestriction)
+			return nil
+		}
+
+		return f()
+	}
+}
+
 func (gui *Gui) outsideFilterMode(f func() error) func() error {
 	return func() error {
 		if !gui.validateNotInFilterMode() {
@@ -64,8 +75,9 @@ func (gui *Gui) keybindingOpts() types.KeybindingsOpts {
 	config := gui.c.UserConfig().Keybinding
 
 	guards := types.KeybindingGuards{
-		OutsideFilterMode: gui.outsideFilterMode,
-		NoPopupPanel:      gui.noPopupPanel,
+		OutsideFilterMode:  gui.outsideFilterMode,
+		OutsideStagingMode: gui.outsideStagingMode,
+		NoPopupPanel:       gui.noPopupPanel,
 	}
 
 	return types.KeybindingsOpts{
