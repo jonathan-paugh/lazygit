@@ -46,6 +46,9 @@ type Binding struct {
 	// If true, this binding is hidden from the bottom bar in staging mode
 	DisabledInStagingMode bool
 
+	// If true, this binding is hidden from the bottom bar in diff mode
+	DisabledInDiffMode bool
+
 	// Function to decide whether the command is enabled, and why. If this
 	// returns an empty string, it is; if it returns a non-empty string, it is
 	// disabled and we show the given text in an error message when trying to
@@ -82,6 +85,7 @@ type Guard func(func() error) func() error
 type KeybindingGuards struct {
 	OutsideFilterMode  Guard
 	OutsideStagingMode Guard
+	OutsideDiffMode    Guard
 	NoPopupPanel       Guard
 }
 

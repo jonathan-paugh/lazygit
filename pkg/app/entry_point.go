@@ -36,6 +36,8 @@ type cliArgs struct {
 	CustomConfigFile   string
 	ScreenMode         string
 	Mode               string
+	DiffFile           string
+	DiffPatch          string
 	PrintVersionInfo   bool
 	Debug              bool
 	TailLogs           bool
@@ -137,6 +139,23 @@ func Start(buildInfo *BuildInfo, integrationTest integrationTypes.IntegrationTes
 	}
 	defer os.RemoveAll(tempDir)
 
+	// For diff mode with a patch file, create a temp git repo so lazygit's
+	// git repo requirement is satisfied without needing a real repo
+	if cliArgs.Mode == "diff" && cliArgs.DiffPatch != "" {
+		tempRepoDir := filepath.Join(tempDir, "diff-repo")
+		if err := os.MkdirAll(tempRepoDir, 0o755); err != nil {
+			log.Fatalf("Failed to create temp repo directory: %v", err)
+		}
+		if err := exec.Command("git", "init", tempRepoDir).Run(); err != nil {
+			log.Fatalf("Failed to init temp repo: %v", err)
+		}
+		cliArgs.GitDir = filepath.Join(tempRepoDir, ".git")
+		cliArgs.WorkTree = tempRepoDir
+		if err := os.Chdir(tempRepoDir); err != nil {
+			log.Fatalf("Failed to change directory to temp repo: %v", err)
+		}
+	}
+
 	appConfig, err := config.NewAppConfig("lazygit", buildInfo.Version, buildInfo.Commit, buildInfo.Date, buildInfo.BuildSource, cliArgs.Debug, tempDir)
 	if err != nil {
 		log.Fatal(err.Error())
@@ -175,7 +194,7 @@ func Start(buildInfo *BuildInfo, integrationTest integrationTypes.IntegrationTes
 
 	parsedGitArg := parseGitArg(cliArgs.GitArg)
 
-	Run(appConfig, common, appTypes.NewStartArgs(cliArgs.FilterPath, parsedGitArg, cliArgs.ScreenMode, cliArgs.Mode, integrationTest))
+	Run(appConfig, common, appTypes.NewStartArgs(cliArgs.FilterPath, parsedGitArg, cliArgs.ScreenMode, cliArgs.Mode, cliArgs.DiffFile, cliArgs.DiffPatch, integrationTest))
 }
 
 func parseCliArgsAndEnvVars() *cliArgs {
@@ -224,9 +243,25 @@ func parseCliArgsAndEnvVars() *cliArgs {
 	flaggy.String(&screenMode, "sm", "screen-mode", "The initial screen-mode, which determines the size of the focused panel. Valid options: 'normal' (default), 'half', 'full'")
 
 	mode := ""
-	flaggy.String(&mode, "md", "mode", "Operating mode. Valid options: 'staging' (restricted to staging/unstaging only)")
+	flaggy.String(&mode, "md", "mode", "Operating mode. Valid options: 'staging' (restricted to staging/unstaging only), 'diff' (read-only diff viewer)")
+
+	diffFile := ""
+	flaggy.String(&diffFile, "fl", "file", "Path to a specific file to diff (requires --mode=diff)")
+
+	diffPatch := ""
+	flaggy.String(&diffPatch, "pt", "patch", "Path to a patch file to display (requires --mode=diff)")
 
 	flaggy.Parse()
+
+	if diffFile != "" && mode != "diff" {
+		log.Fatal("--file requires --mode=diff")
+	}
+	if diffPatch != "" && mode != "diff" {
+		log.Fatal("--patch requires --mode=diff")
+	}
+	if diffFile != "" && diffPatch != "" {
+		log.Fatal("--file and --patch are mutually exclusive")
+	}
 
 	if os.Getenv("DEBUG") == "TRUE" {
 		debug = true
@@ -248,6 +283,8 @@ func parseCliArgsAndEnvVars() *cliArgs {
 		CustomConfigFile:   customConfigFile,
 		ScreenMode:         screenMode,
 		Mode:               mode,
+		DiffFile:           diffFile,
+		DiffPatch:          diffPatch,
 	}
 }
 

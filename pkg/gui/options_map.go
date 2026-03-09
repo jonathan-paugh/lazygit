@@ -49,12 +49,16 @@ func (self *OptionsMapMgr) renderContextOptionsMap() {
 	})...)
 
 	inStagingMode := self.c.Modes().StagingMode.Active()
+	inDiffMode := self.c.Modes().DiffMode.Active()
 
 	bindingsToDisplay := lo.Filter(allBindings, func(binding *types.Binding, _ int) bool {
 		if !binding.DisplayOnScreen || binding.IsDisabled() {
 			return false
 		}
 		if inStagingMode && binding.DisabledInStagingMode {
+			return false
+		}
+		if inDiffMode && binding.DisabledInDiffMode {
 			return false
 		}
 		return true

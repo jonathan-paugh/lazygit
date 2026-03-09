@@ -135,6 +135,9 @@ func (self *WindowHelper) WindowForView(viewName string) string {
 }
 
 func (self *WindowHelper) SideWindows() []string {
+	if self.c.Modes().DiffMode.Active() {
+		return []string{}
+	}
 	if self.c.Modes().StagingMode.Active() {
 		return []string{"files"}
 	}
