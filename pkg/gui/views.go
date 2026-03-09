@@ -201,7 +201,7 @@ func (gui *Gui) configureViewProperties() {
 
 	for _, view := range []*gocui.View{gui.Views.Main, gui.Views.Secondary, gui.Views.Staging, gui.Views.StagingSecondary, gui.Views.PatchBuilding, gui.Views.PatchBuildingSecondary, gui.Views.MergeConflicts} {
 		view.Title = gui.c.Tr.DiffTitle
-		view.CanScrollPastBottom = gui.c.UserConfig().Gui.ScrollPastBottom
+		view.CanScrollPastBottom = false
 		view.TabWidth = gui.c.UserConfig().Gui.TabWidth
 	}
 
@@ -221,7 +221,9 @@ func (gui *Gui) configureViewProperties() {
 			return keyToTitlePrefix(binding)
 		})
 
-		if gui.InStagingMode {
+		if gui.InDiffMode {
+			// No side panels in diff mode — skip all jump labels
+		} else if gui.InStagingMode {
 			gui.Views.Files.TitlePrefix = jumpLabels[0]
 		} else {
 			gui.Views.Status.TitlePrefix = jumpLabels[0]
@@ -240,7 +242,9 @@ func (gui *Gui) configureViewProperties() {
 			gui.Views.Stash.TitlePrefix = jumpLabels[4]
 		}
 
-		gui.Views.Main.TitlePrefix = keyToTitlePrefix(gui.c.UserConfig().Keybinding.Universal.FocusMainView)
+		if !gui.InDiffMode {
+			gui.Views.Main.TitlePrefix = keyToTitlePrefix(gui.c.UserConfig().Keybinding.Universal.FocusMainView)
+		}
 		gui.Views.Extras.TitlePrefix = keyToTitlePrefix(gui.c.UserConfig().Keybinding.Universal.ExtrasMenu)
 	} else {
 		gui.Views.Status.TitlePrefix = ""

@@ -51,6 +51,9 @@ func (self *SideWindowController) Context() types.Context {
 
 func (self *SideWindowController) previousSideWindow() error {
 	windows := self.c.Helpers().Window.SideWindows()
+	if len(windows) == 0 {
+		return nil
+	}
 	currentWindow := self.c.Helpers().Window.CurrentWindow()
 	var newWindow string
 	if currentWindow == "" || currentWindow == windows[0] {
@@ -75,6 +78,9 @@ func (self *SideWindowController) previousSideWindow() error {
 
 func (self *SideWindowController) nextSideWindow() error {
 	windows := self.c.Helpers().Window.SideWindows()
+	if len(windows) == 0 {
+		return nil
+	}
 	currentWindow := self.c.Helpers().Window.CurrentWindow()
 	var newWindow string
 	if currentWindow == "" || currentWindow == windows[len(windows)-1] {

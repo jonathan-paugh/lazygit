@@ -70,6 +70,8 @@ type WindowArrangementArgs struct {
 	IsAnyModeActive bool
 	// Whether staging mode is active (restricted to staging/unstaging only)
 	InStagingMode bool
+	// Whether diff mode is active (read-only diff viewer)
+	InDiffMode bool
 	// Whether the search prompt is shown in the bottom left
 	InSearchPrompt bool
 	// One of '' (not searching), 'Search: ', and 'Filter: '
@@ -101,6 +103,7 @@ func (self *WindowArrangementHelper) GetWindowDimensions(informationStr string, 
 		InDemo:            self.c.InDemo(),
 		IsAnyModeActive:   self.modeHelper.IsAnyModeActive(),
 		InStagingMode:     self.c.Modes().StagingMode.Active(),
+		InDiffMode:        self.c.Modes().DiffMode.Active(),
 		InSearchPrompt:    repoState.InSearchPrompt(),
 		SearchPrefix:      searchPrefix,
 	}
@@ -205,6 +208,16 @@ func MergeMaps[K comparable, V any](maps ...map[K]V) map[K]V {
 }
 
 func mainSectionChildren(args WindowArrangementArgs) []*boxlayout.Box {
+	// In diff mode, only show the main panel — no secondary view
+	if args.InDiffMode {
+		return []*boxlayout.Box{
+			{
+				Window: "main",
+				Weight: 1,
+			},
+		}
+	}
+
 	// if we're not in split mode we can just show the one main panel. Likewise if
 	// the main panel is focused and we're in full-screen mode
 	if !args.SplitMainPanel || (args.ScreenMode == types.SCREEN_FULL && args.CurrentWindow == "main") {
@@ -238,6 +251,11 @@ func mainSectionChildren(args WindowArrangementArgs) []*boxlayout.Box {
 }
 
 func getMidSectionWeights(args WindowArrangementArgs) (int, int) {
+	// In diff mode, hide side panels entirely — only show the main diff view
+	if args.InDiffMode {
+		return 0, 1
+	}
+
 	sidePanelWidthRatio := args.UserConfig.Gui.SidePanelWidth
 	// Using 120 so that the default of 0.3333 will remain consistent with previous behavior
 	const maxColumnCount = 120
@@ -423,6 +441,18 @@ func getDefaultStashWindowBox(args WindowArrangementArgs) *boxlayout.Box {
 
 func sidePanelChildren(args WindowArrangementArgs) func(width int, height int) []*boxlayout.Box {
 	return func(width int, height int) []*boxlayout.Box {
+		if args.InDiffMode {
+			// One panel needs Weight: 1 to satisfy boxlayout's normalizeWeights
+			// (the parent section has weight 0 so this panel is invisible)
+			return []*boxlayout.Box{
+				{Window: "status", Weight: 1},
+				{Window: "files", Size: 0},
+				{Window: "branches", Size: 0},
+				{Window: "commits", Size: 0},
+				{Window: "stash", Size: 0},
+			}
+		}
+
 		if args.InStagingMode {
 			return []*boxlayout.Box{
 				{Window: "status", Size: 0},

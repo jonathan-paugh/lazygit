@@ -16,6 +16,10 @@ type StartArgs struct {
 	ScreenMode string
 	// Mode determines the operating mode (e.g. "staging" for restricted staging-only mode)
 	Mode string
+	// DiffFile is the path to a specific file to diff (only used with --mode=diff)
+	DiffFile string
+	// DiffPatch is the path to a patch file to display (only used with --mode=diff)
+	DiffPatch string
 }
 
 type GitArg string
@@ -29,13 +33,16 @@ const (
 )
 
 const ModeStagingValue = "staging"
+const ModeDiffValue = "diff"
 
-func NewStartArgs(filterPath string, gitArg GitArg, screenMode string, mode string, test integrationTypes.IntegrationTest) StartArgs {
+func NewStartArgs(filterPath string, gitArg GitArg, screenMode string, mode string, diffFile string, diffPatch string, test integrationTypes.IntegrationTest) StartArgs {
 	return StartArgs{
 		FilterPath:      filterPath,
 		GitArg:          gitArg,
 		ScreenMode:      screenMode,
 		Mode:            mode,
+		DiffFile:        diffFile,
+		DiffPatch:       diffPatch,
 		IntegrationTest: test,
 	}
 }

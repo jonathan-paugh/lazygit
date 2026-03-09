@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -31,6 +32,7 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/diffing"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/filtering"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/marked_base_commit"
+	"github.com/jesseduffield/lazygit/pkg/gui/modes/diff_mode"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/staging_mode"
 	"github.com/jesseduffield/lazygit/pkg/gui/popup"
 	"github.com/jesseduffield/lazygit/pkg/gui/presentation"
@@ -105,6 +107,9 @@ type Gui struct {
 
 	// whether staging mode is active (set from --mode=staging CLI arg)
 	InStagingMode bool
+
+	// whether diff mode is active (set from --mode=diff CLI arg)
+	InDiffMode bool
 
 	Views types.Views
 
@@ -413,9 +418,59 @@ func (gui *Gui) onNewRepo(startArgs appTypes.StartArgs, contextKey types.Context
 		}
 	}
 
-	gui.c.Context().Push(contextToPush, types.OnFocusOpts{})
+	if gui.InDiffMode {
+		// In diff mode, focus the main view instead of a side panel
+		gui.c.Context().Push(gui.State.Contexts.Normal, types.OnFocusOpts{})
+		// Defer rendering until after layout so the view has correct dimensions
+		// for scrollbar calculation
+		gui.afterLayout(func() error {
+			gui.renderDiffModeContent(startArgs)
+			return nil
+		})
+	} else {
+		gui.c.Context().Push(contextToPush, types.OnFocusOpts{})
+	}
 
 	return nil
+}
+
+func (gui *Gui) renderDiffModeContent(startArgs appTypes.StartArgs) {
+	diffMode := gui.State.Modes.DiffMode
+	repoName := gui.git.RepoPaths.RepoName()
+
+	if diffMode.IsPatchMode() {
+		content, err := os.ReadFile(diffMode.PatchPath())
+		if err != nil {
+			gui.c.ErrorToast(fmt.Sprintf("Failed to read patch file: %v", err))
+			return
+		}
+		gui.c.RenderToMainViews(types.RefreshMainOpts{
+			Pair: gui.c.MainViewPairs().Normal,
+			Main: &types.ViewUpdateOpts{
+				Title: "Diff",
+				Task:  types.NewRenderStringTask(string(content)),
+			},
+		})
+		return
+	}
+
+	// Build the git diff command
+	cmdArgs := []string{"diff", "--color=always"}
+	title := fmt.Sprintf("Diff (%s)", repoName)
+
+	if diffMode.IsFileMode() {
+		cmdArgs = append(cmdArgs, "--", diffMode.FilePath())
+		title = fmt.Sprintf("Diff (%s): %s", repoName, diffMode.FilePath())
+	}
+
+	cmd := exec.Command("git", cmdArgs...)
+	gui.c.RenderToMainViews(types.RefreshMainOpts{
+		Pair: gui.c.MainViewPairs().Normal,
+		Main: &types.ViewUpdateOpts{
+			Title: title,
+			Task:  types.NewRunPtyTask(cmd),
+		},
+	})
 }
 
 func (gui *Gui) getPerRepoConfigFiles() []*config.ConfigFile {
@@ -591,7 +646,8 @@ func (gui *Gui) resetState(startArgs appTypes.StartArgs) types.Context {
 			CherryPicking:    cherrypicking.New(),
 			Diffing:          diffing.New(),
 			MarkedBaseCommit: marked_base_commit.New(),
-			StagingMode:      staging_mode.New(startArgs.Mode == appTypes.ModeStagingValue),
+			StagingMode:      staging_mode.New(startArgs.Mode == appTypes.ModeStagingValue || startArgs.Mode == appTypes.ModeDiffValue),
+			DiffMode:         diff_mode.New(startArgs.Mode == appTypes.ModeDiffValue, startArgs.DiffFile, startArgs.DiffPatch),
 		},
 		ScreenMode: initialScreenMode,
 		// TODO: only use contexts from context manager
@@ -847,7 +903,8 @@ func (gui *Gui) filesTabViews() []context.TabView {
 
 // Run: setup the gui with keybindings and start the mainloop
 func (gui *Gui) Run(startArgs appTypes.StartArgs) error {
-	gui.InStagingMode = startArgs.Mode == appTypes.ModeStagingValue
+	gui.InDiffMode = startArgs.Mode == appTypes.ModeDiffValue
+	gui.InStagingMode = startArgs.Mode == appTypes.ModeStagingValue || gui.InDiffMode
 
 	g, err := gui.initGocui(Headless(), startArgs.IntegrationTest)
 	if err != nil {

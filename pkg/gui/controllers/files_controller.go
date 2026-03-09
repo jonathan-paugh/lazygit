@@ -42,12 +42,13 @@ func NewFilesController(
 func (self *FilesController) GetKeybindings(opts types.KeybindingsOpts) []*types.Binding {
 	return []*types.Binding{
 		{
-			Key:               opts.GetKey(opts.Config.Universal.Select),
-			Handler:           self.withItems(self.press),
-			GetDisabledReason: self.require(self.withFileTreeViewModelMutex(self.itemsSelected())),
-			Description:       self.c.Tr.Stage,
-			Tooltip:           self.c.Tr.StageTooltip,
-			DisplayOnScreen:   true,
+			Key:                opts.GetKey(opts.Config.Universal.Select),
+			Handler:            opts.Guards.OutsideDiffMode(self.withItems(self.press)),
+			GetDisabledReason:  self.require(self.withFileTreeViewModelMutex(self.itemsSelected())),
+			Description:        self.c.Tr.Stage,
+			Tooltip:            self.c.Tr.StageTooltip,
+			DisplayOnScreen:    true,
+			DisabledInDiffMode: true,
 		},
 		{
 			Key:         opts.GetKey(opts.Config.Files.OpenStatusFilter),
@@ -132,10 +133,11 @@ func (self *FilesController) GetKeybindings(opts types.KeybindingsOpts) []*types
 			OpensMenu:   true,
 		},
 		{
-			Key:         opts.GetKey(opts.Config.Files.ToggleStagedAll),
-			Handler:     self.toggleStagedAll,
-			Description: self.c.Tr.ToggleStagedAll,
-			Tooltip:     self.c.Tr.ToggleStagedAllTooltip,
+			Key:                opts.GetKey(opts.Config.Files.ToggleStagedAll),
+			Handler:            opts.Guards.OutsideDiffMode(self.toggleStagedAll),
+			Description:        self.c.Tr.ToggleStagedAll,
+			Tooltip:            self.c.Tr.ToggleStagedAllTooltip,
+			DisabledInDiffMode: true,
 		},
 		{
 			Key:               opts.GetKey(opts.Config.Universal.GoInto),
@@ -145,13 +147,14 @@ func (self *FilesController) GetKeybindings(opts types.KeybindingsOpts) []*types
 			Tooltip:           self.c.Tr.FileEnterTooltip,
 		},
 		{
-			Key:               opts.GetKey(opts.Config.Universal.Remove),
-			Handler:           self.withItems(self.remove),
-			GetDisabledReason: self.withFileTreeViewModelMutex(self.require(self.itemsSelected(self.canRemove))),
-			Description:       self.c.Tr.Discard,
-			Tooltip:           self.c.Tr.DiscardFileChangesTooltip,
-			OpensMenu:         true,
-			DisplayOnScreen:   true,
+			Key:                opts.GetKey(opts.Config.Universal.Remove),
+			Handler:            opts.Guards.OutsideDiffMode(self.withItems(self.remove)),
+			GetDisabledReason:  self.withFileTreeViewModelMutex(self.require(self.itemsSelected(self.canRemove))),
+			Description:        self.c.Tr.Discard,
+			Tooltip:            self.c.Tr.DiscardFileChangesTooltip,
+			OpensMenu:          true,
+			DisplayOnScreen:    true,
+			DisabledInDiffMode: true,
 		},
 		{
 			Key:         opts.GetKey(opts.Config.Commits.ViewResetOptions),
