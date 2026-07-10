@@ -35,6 +35,7 @@ type cliArgs struct {
 	GitDir             string
 	CustomConfigFile   string
 	ScreenMode         string
+	PortraitMode       string
 	Mode               string
 	DiffFile           string
 	DiffPatch          string
@@ -161,6 +162,10 @@ func Start(buildInfo *BuildInfo, integrationTest integrationTypes.IntegrationTes
 		log.Fatal(err.Error())
 	}
 
+	if cliArgs.PortraitMode != "" {
+		appConfig.SetPortraitModeOverride(cliArgs.PortraitMode)
+	}
+
 	if integrationTest != nil {
 		integrationTest.SetupConfig(appConfig)
 		// Set this to true so that integration tests don't have to explicitly deal with the hunk
@@ -242,6 +247,12 @@ func parseCliArgsAndEnvVars() *cliArgs {
 	screenMode := ""
 	flaggy.String(&screenMode, "sm", "screen-mode", "The initial screen-mode, which determines the size of the focused panel. Valid options: 'normal' (default), 'half', 'full'")
 
+	portrait := false
+	flaggy.Bool(&portrait, "", "portrait", "Force portrait layout: stack the side panels above the main panel (overrides gui.portraitMode)")
+
+	landscape := false
+	flaggy.Bool(&landscape, "", "landscape", "Force landscape layout: place the side panels beside the main panel (overrides gui.portraitMode)")
+
 	mode := ""
 	flaggy.String(&mode, "md", "mode", "Operating mode. Valid options: 'staging' (restricted to staging/unstaging only), 'diff' (read-only diff viewer)")
 
@@ -261,6 +272,15 @@ func parseCliArgsAndEnvVars() *cliArgs {
 	}
 	if diffFile != "" && diffPatch != "" {
 		log.Fatal("--file and --patch are mutually exclusive")
+	}
+	if portrait && landscape {
+		log.Fatal("--portrait and --landscape are mutually exclusive")
+	}
+	portraitMode := ""
+	if portrait {
+		portraitMode = "always"
+	} else if landscape {
+		portraitMode = "never"
 	}
 
 	if os.Getenv("DEBUG") == "TRUE" {
@@ -282,6 +302,7 @@ func parseCliArgsAndEnvVars() *cliArgs {
 		GitDir:             gitDir,
 		CustomConfigFile:   customConfigFile,
 		ScreenMode:         screenMode,
+		PortraitMode:       portraitMode,
 		Mode:               mode,
 		DiffFile:           diffFile,
 		DiffPatch:          diffPatch,
