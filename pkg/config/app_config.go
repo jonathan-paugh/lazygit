@@ -31,6 +31,9 @@ type AppConfig struct {
 	userConfigDir         string
 	tempDir               string
 	appState              *AppState
+	// portraitModeOverride, when set via the --portrait-mode CLI flag, forces
+	// gui.portraitMode and is re-applied after every config reload.
+	portraitModeOverride string
 }
 
 type AppConfigurer interface {
@@ -528,6 +531,23 @@ func (c *AppConfig) GetUserConfig() *UserConfig {
 	return c.userConfig
 }
 
+// SetPortraitModeOverride forces gui.portraitMode from the CLI, overriding
+// whatever the config files specify for the rest of the session. Applies
+// immediately and is re-applied after every config reload.
+func (c *AppConfig) SetPortraitModeOverride(mode string) {
+	c.portraitModeOverride = mode
+	c.applyCliOverrides()
+}
+
+// applyCliOverrides re-applies any CLI-provided config overrides on top of the
+// freshly loaded user config. Called after each (re)load so overrides survive
+// repo switches and on-disk config changes.
+func (c *AppConfig) applyCliOverrides() {
+	if c.portraitModeOverride != "" {
+		c.userConfig.Gui.PortraitMode = c.portraitModeOverride
+	}
+}
+
 // GetAppState returns the app state
 func (c *AppConfig) GetAppState() *AppState {
 	return c.appState
@@ -552,6 +572,7 @@ func (c *AppConfig) ReloadUserConfigForRepo(repoConfigFiles []*ConfigFile) error
 
 	c.userConfig = userConfig
 	c.userConfigFiles = configFiles
+	c.applyCliOverrides()
 	return nil
 }
 
@@ -576,6 +597,7 @@ func (c *AppConfig) ReloadChangedUserConfigFiles() (error, bool) {
 	}
 
 	c.userConfig = userConfig
+	c.applyCliOverrides()
 	return nil, true
 }
 
