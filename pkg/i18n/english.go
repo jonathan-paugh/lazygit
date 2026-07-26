@@ -668,6 +668,8 @@ type TranslationSet struct {
 	MustExitFilterModePrompt              string
 	StagingModeRestriction                string
 	DiffModeRestriction                   string
+	DiffModeNoChanges                     string
+	DiffModeNoChangesForFile              string
 	Diff                                  string
 	EnterRefToDiff                        string
 	EnterRefName                          string
@@ -1818,6 +1820,8 @@ func EnglishTranslationSet() *TranslationSet {
 		MustExitFilterModePrompt:         "Command not available in filter-by-path mode. Exit filter-by-path mode?",
 		StagingModeRestriction:           "Not available in staging mode",
 		DiffModeRestriction:              "Not available in diff mode",
+		DiffModeNoChanges:                "No changes to show",
+		DiffModeNoChangesForFile:         "No changes in {{.path}}",
 		Diff:                             "Diff",
 		EnterRefToDiff:                   "Enter ref to diff",
 		EnterRefName:                     "Enter ref:",

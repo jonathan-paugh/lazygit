@@ -112,14 +112,14 @@ func (gui *Gui) GetInitialKeybindings() ([]*types.Binding, []*gocui.ViewMouseBin
 		{
 			ViewName:    "",
 			Keys:        opts.GetKeys(opts.Config.Universal.ScrollUpMain),
-			Handler:     gui.scrollUpMain,
+			Handler:     gui.pageUpMain,
 			Alternative: "fn+up/shift+k",
 			Description: gui.c.Tr.ScrollUpMainWindow,
 		},
 		{
 			ViewName:    "",
 			Keys:        opts.GetKeys(opts.Config.Universal.ScrollDownMain),
-			Handler:     gui.scrollDownMain,
+			Handler:     gui.pageDownMain,
 			Alternative: "fn+down/shift+j",
 			Description: gui.c.Tr.ScrollDownMainWindow,
 		},

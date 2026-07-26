@@ -21,7 +21,9 @@ func (gui *Gui) scrollDownView(view *gocui.View) {
 	gui.readLinesToFillView(view)
 }
 
-func (gui *Gui) scrollUpMain() error {
+// mainScrollView returns the view the main-window scroll keys act on, and marks
+// merge conflicts as user-scrolled so the view stops following the selection.
+func (gui *Gui) mainScrollView() *gocui.View {
 	var view *gocui.View
 	if gui.c.Context().Current().GetWindowName() == "secondary" {
 		view = gui.secondaryView()
@@ -37,24 +39,39 @@ func (gui *Gui) scrollUpMain() error {
 		gui.State.Contexts.MergeConflicts.SetUserScrolling(true)
 	}
 
-	gui.scrollUpView(view)
+	return view
+}
+
+func (gui *Gui) scrollUpMain() error {
+	gui.scrollUpView(gui.mainScrollView())
 
 	return nil
 }
 
 func (gui *Gui) scrollDownMain() error {
-	var view *gocui.View
-	if gui.c.Context().Current().GetWindowName() == "secondary" {
-		view = gui.secondaryView()
-	} else {
-		view = gui.mainView()
-	}
+	gui.scrollDownView(gui.mainScrollView())
 
-	if view.Name() == "mergeConflicts" {
-		gui.State.Contexts.MergeConflicts.SetUserScrolling(true)
-	}
+	return nil
+}
 
-	gui.scrollDownView(view)
+// pageScrollDelta is half a screen, matching the step the terminal's own page
+// keys use, so PageUp/PageDown move the same distance inside lazygit as outside
+// it. Kept separate from gui.scrollHeight, which the mouse wheel uses.
+func pageScrollDelta(view *gocui.View) int {
+	return max(1, view.InnerHeight()/2)
+}
+
+func (gui *Gui) pageUpMain() error {
+	view := gui.mainScrollView()
+	view.ScrollUp(pageScrollDelta(view))
+
+	return nil
+}
+
+func (gui *Gui) pageDownMain() error {
+	view := gui.mainScrollView()
+	view.ScrollDown(pageScrollDelta(view))
+	gui.readLinesToFillView(view)
 
 	return nil
 }

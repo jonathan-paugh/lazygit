@@ -500,23 +500,73 @@ func (gui *Gui) renderDiffModeContent() {
 		return
 	}
 
-	// Build the git diff command
-	cmdArgs := []string{"diff", "--color=always"}
+	filePath := diffMode.FilePath()
 	title := fmt.Sprintf("Diff (%s)", repoName)
-
 	if diffMode.IsFileMode() {
-		cmdArgs = append(cmdArgs, "--", diffMode.FilePath())
-		title = fmt.Sprintf("Diff (%s): %s", repoName, diffMode.FilePath())
+		title = fmt.Sprintf("Diff (%s): %s", repoName, filePath)
 	}
 
-	cmd := exec.Command("git", cmdArgs...)
+	content, err := gui.diffModeDiff(filePath)
+	if err != nil {
+		gui.c.ErrorToast(fmt.Sprintf("Failed to produce diff: %v", err))
+		return
+	}
+
+	if strings.TrimSpace(content) == "" {
+		if filePath != "" {
+			content = utils.ResolvePlaceholderString(
+				gui.c.Tr.DiffModeNoChangesForFile,
+				map[string]string{"path": filePath},
+			)
+		} else {
+			content = gui.c.Tr.DiffModeNoChanges
+		}
+	}
+
 	gui.c.RenderToMainViews(types.RefreshMainOpts{
 		Pair: gui.c.MainViewPairs().Normal,
 		Main: &types.ViewUpdateOpts{
 			Title: title,
-			Task:  types.NewRunPtyTask(cmd),
+			Task:  types.NewRenderStringTask(content),
 		},
 	})
+}
+
+// diffModeDiff produces the diff shown in diff mode. It diffs against HEAD so
+// that staged changes are included, and compares against /dev/null for
+// untracked files, which git otherwise refuses to diff at all.
+func (gui *Gui) diffModeDiff(filePath string) (string, error) {
+	if filePath != "" {
+		if _, err := os.Stat(filePath); err == nil && gitFileIsUntracked(filePath) {
+			// --no-index exits non-zero purely to signal "files differ", so the
+			// error is discarded and the output used as-is.
+			output, _ := exec.Command("git", "diff", "--color=always", "--no-index", os.DevNull, filePath).Output()
+			return string(output), nil
+		}
+	}
+
+	cmdArgs := []string{"diff", "--color=always"}
+	if gitRepoHasCommits() {
+		cmdArgs = []string{"diff", "HEAD", "--color=always"}
+	}
+	if filePath != "" {
+		cmdArgs = append(cmdArgs, "--", filePath)
+	}
+
+	output, err := exec.Command("git", cmdArgs...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(output), nil
+}
+
+func gitFileIsUntracked(filePath string) bool {
+	return exec.Command("git", "ls-files", "--error-unmatch", "--", filePath).Run() != nil
+}
+
+func gitRepoHasCommits() bool {
+	return exec.Command("git", "rev-parse", "--verify", "--quiet", "HEAD").Run() == nil
 }
 
 func (gui *Gui) getPerRepoConfigFiles() []*config.ConfigFile {
