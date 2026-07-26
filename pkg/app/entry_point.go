@@ -143,6 +143,15 @@ func Start(buildInfo *BuildInfo, integrationTest integrationTypes.IntegrationTes
 	// For diff mode with a patch file, create a temp git repo so lazygit's
 	// git repo requirement is satisfied without needing a real repo
 	if cliArgs.Mode == "diff" && cliArgs.DiffPatch != "" {
+		// Resolve the patch path before the chdir below: it's read lazily, long
+		// after we've moved into the temp repo, so a relative path would no
+		// longer point at the file the user named on the command line.
+		absPatchPath, err := filepath.Abs(cliArgs.DiffPatch)
+		if err != nil {
+			log.Fatalf("Failed to resolve patch path %q: %v", cliArgs.DiffPatch, err)
+		}
+		cliArgs.DiffPatch = absPatchPath
+
 		tempRepoDir := filepath.Join(tempDir, "diff-repo")
 		if err := os.MkdirAll(tempRepoDir, 0o755); err != nil {
 			log.Fatalf("Failed to create temp repo directory: %v", err)
