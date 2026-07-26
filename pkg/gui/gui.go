@@ -494,7 +494,7 @@ func (gui *Gui) renderDiffModeContent() {
 			Pair: gui.c.MainViewPairs().Normal,
 			Main: &types.ViewUpdateOpts{
 				Title: "Diff",
-				Task:  types.NewRenderStringTask(string(content)),
+				Task:  types.NewRenderStringTask(colorPatch(string(content))),
 			},
 		})
 		return
@@ -559,6 +559,58 @@ func (gui *Gui) diffModeDiff(filePath string) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+// colorPatch gives raw patch text the colours lazygit shows on its own diffs.
+// A patch file reaches diff mode as plain text without passing through git,
+// which is what colours every other diff in the app. The colouring is applied
+// per line and never rewrites the text, so what is displayed stays byte for
+// byte what the file contains.
+func colorPatch(patchText string) string {
+	lines := strings.Split(patchText, "\n")
+	coloredLines := make([]string, 0, len(lines))
+	// Everything before the first hunk belongs to a file header. Tracking this
+	// rather than matching on "---" and "+++" keeps a removed line whose content
+	// happens to start with those markers from being mistaken for a header.
+	inFileHeader := true
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff ") {
+			inFileHeader = true
+		} else if strings.HasPrefix(line, "@@") {
+			inFileHeader = false
+		}
+
+		coloredLines = append(coloredLines, colorPatchLine(line, inFileHeader))
+	}
+
+	return strings.Join(coloredLines, "\n")
+}
+
+func colorPatchLine(line string, inFileHeader bool) string {
+	switch {
+	case strings.HasPrefix(line, "@@"):
+		// Only the range is coloured, leaving any trailing context in the normal
+		// text colour, which is how the custom patch views render it.
+		if contextStart := strings.Index(line[2:], "@@"); contextStart >= 0 {
+			rangeEnd := contextStart + 4
+			return style.FgCyan.Sprint(line[:rangeEnd]) + theme.DefaultTextColor.Sprint(line[rangeEnd:])
+		}
+
+		return style.FgCyan.Sprint(line)
+
+	case inFileHeader:
+		return theme.DefaultTextColor.SetBold().Sprint(line)
+
+	case strings.HasPrefix(line, "+"):
+		return style.FgGreen.Sprint(line)
+
+	case strings.HasPrefix(line, "-"):
+		return style.FgRed.Sprint(line)
+
+	default:
+		return line
+	}
 }
 
 func gitFileIsUntracked(filePath string) bool {
