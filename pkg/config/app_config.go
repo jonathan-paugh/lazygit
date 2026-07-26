@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
@@ -34,6 +35,12 @@ type AppConfig struct {
 	// portraitModeOverride, when set via the --portrait-mode CLI flag, forces
 	// gui.portraitMode and is re-applied after every config reload.
 	portraitModeOverride string
+	// sidePanelsOverride, when set via the --mode CLI flag, replaces
+	// gui.sidePanels for the rest of the session. sidePanelsOverridden tracks
+	// whether it was set at all, since an empty override (no side panels, as in
+	// diff mode) is meaningful and can't be told apart from unset by nil-ness.
+	sidePanelsOverride   []SidePanel
+	sidePanelsOverridden bool
 }
 
 type AppConfigurer interface {
@@ -138,8 +145,23 @@ func findOrCreateConfigDir() (string, error) {
 	return folder, os.MkdirAll(folder, 0o755)
 }
 
+// KeybindingPlatform returns the platform whose default keybindings should be
+// used. Normally this is the OS we're running on, but it can be overridden with
+// the LAZYGIT_KEYBINDING_PLATFORM environment variable; this is useful e.g. when
+// running lazygit in a Linux container that you access over ssh from a Mac, and
+// you'd rather use the Mac keybindings. An unrecognized value falls back to the
+// real OS, which gives meaningful bindings, rather than to the (arbitrary)
+// non-darwin defaults.
+func KeybindingPlatform() string {
+	platform := os.Getenv("LAZYGIT_KEYBINDING_PLATFORM")
+	if lo.Contains([]string{"darwin", "linux", "windows"}, platform) {
+		return platform
+	}
+	return runtime.GOOS
+}
+
 func loadUserConfigWithDefaults(configFiles []*ConfigFile, isGuiInitialized bool) (*UserConfig, error) {
-	return loadUserConfig(configFiles, GetDefaultConfig(), isGuiInitialized)
+	return loadUserConfig(configFiles, GetDefaultConfigForPlatform(KeybindingPlatform()), isGuiInitialized)
 }
 
 func loadUserConfig(configFiles []*ConfigFile, base *UserConfig, isGuiInitialized bool) (*UserConfig, error) {
@@ -205,6 +227,7 @@ func loadUserConfig(configFiles []*ConfigFile, base *UserConfig, isGuiInitialize
 		}
 	}
 
+	base.Keybinding.MergeLegacyAltKeybindings()
 	return base, nil
 }
 
@@ -285,6 +308,26 @@ func computeMigratedConfig(path string, content []byte, changes *ChangesSet) ([]
 		}
 		if didReplace {
 			changes.Add(fmt.Sprintf("Renamed '%s' to '%s'", strings.Join(pathToReplace.oldPath, "."), pathToReplace.newName))
+		}
+	}
+
+	pathsToMove := []struct {
+		oldPath []string
+		newPath []string
+	}{
+		{
+			[]string{"keybinding", "worktrees", "viewWorktreeOptions"},
+			[]string{"keybinding", "universal", "newWorktree"},
+		},
+	}
+
+	for _, pathToMove := range pathsToMove {
+		err, didMove := yaml_utils.MoveYamlKey(&rootNode, pathToMove.oldPath, pathToMove.newPath)
+		if err != nil {
+			return nil, false, fmt.Errorf("Couldn't migrate config file at `%s` for key %s: %w", path, strings.Join(pathToMove.oldPath, "."), err)
+		}
+		if didMove {
+			changes.Add(fmt.Sprintf("Moved '%s' to '%s'", strings.Join(pathToMove.oldPath, "."), strings.Join(pathToMove.newPath, ".")))
 		}
 	}
 
@@ -450,7 +493,8 @@ func migrateAllBranchesLogCmd(rootNode *yaml.Node, changes *ChangesSet) error {
 			// We will later populate it with the individual allBranchesLogCmd record
 			cmdsKeyNode = &yaml.Node{Kind: yaml.ScalarNode, Value: "allBranchesLogCmds"}
 			cmdsValueNode = &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{}}
-			gitNode.Content = append(gitNode.Content,
+			gitNode.Content = append(
+				gitNode.Content,
 				cmdsKeyNode,
 				cmdsValueNode,
 			)
@@ -539,12 +583,34 @@ func (c *AppConfig) SetPortraitModeOverride(mode string) {
 	c.applyCliOverrides()
 }
 
+// SetSidePanelsOverride forces gui.sidePanels from the CLI, overriding whatever
+// the config files specify for the rest of the session. Applies immediately and
+// is re-applied after every config reload.
+//
+// This deliberately bypasses validateSidePanels, which requires files, branches
+// and commits to be present: the restricted modes hide panels precisely so the
+// operations that would focus them are unreachable, and their keybinding guards
+// block those code paths independently.
+func (c *AppConfig) SetSidePanelsOverride(panels []SidePanel) {
+	c.sidePanelsOverride = panels
+	c.sidePanelsOverridden = true
+	c.applyCliOverrides()
+}
+
 // applyCliOverrides re-applies any CLI-provided config overrides on top of the
 // freshly loaded user config. Called after each (re)load so overrides survive
 // repo switches and on-disk config changes.
 func (c *AppConfig) applyCliOverrides() {
 	if c.portraitModeOverride != "" {
 		c.userConfig.Gui.PortraitMode = c.portraitModeOverride
+	}
+	if c.sidePanelsOverridden {
+		c.userConfig.Gui.SidePanels = c.sidePanelsOverride
+		if len(c.sidePanelsOverride) == 0 {
+			// With no side panels there is nothing to jump between, so the jump
+			// labels would only be noise on the main view's title.
+			c.userConfig.Gui.ShowPanelJumps = false
+		}
 	}
 }
 
@@ -726,10 +792,27 @@ type AppState struct {
 	ShellCommandsHistory []string `yaml:"customcommandshistory"`
 
 	HideCommandLog bool
+
+	// Cache of GitHub pull requests per repo path, so that PR info can be
+	// shown instantly on startup before the async refresh completes.
+	GithubPullRequests map[string][]CachedPullRequest `yaml:"githubPullRequests"`
+}
+
+// CachedPullRequest stores the essential fields of a GitHub pull request
+// for persisting in the app state cache.
+type CachedPullRequest struct {
+	HeadRefName         string `yaml:"headRefName"`
+	Number              int    `yaml:"number"`
+	Title               string `yaml:"title"`
+	State               string `yaml:"state"`
+	Url                 string `yaml:"url"`
+	HeadRepositoryOwner string `yaml:"headRepositoryOwner"`
 }
 
 func getDefaultAppState() *AppState {
-	return &AppState{}
+	return &AppState{
+		GithubPullRequests: make(map[string][]CachedPullRequest),
+	}
 }
 
 func LogPath() (string, error) {

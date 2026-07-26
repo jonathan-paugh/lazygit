@@ -61,6 +61,7 @@ func AddCoAuthorToMessage(message string, author string) string {
 }
 
 func AddCoAuthorToDescription(description string, author string) string {
+	description = strings.TrimRight(description, "\n")
 	if description != "" {
 		lines := strings.Split(description, "\n")
 		if strings.HasPrefix(lines[len(lines)-1], "Co-authored-by:") {
@@ -242,7 +243,7 @@ func (self *CommitCommands) AmendHeadCmdObj() *oscommands.CmdObj {
 func (self *CommitCommands) ShowCmdObj(hash string, filterPaths []string) *oscommands.CmdObj {
 	contextSize := self.UserConfig().Git.DiffContextSize
 
-	extDiffCmd := self.pagerConfig.GetExternalDiffCommand()
+	extDiffCmd := self.pagerConfig.GetExternalDiffCommand(contextSize)
 	useExtDiffGitConfig := self.pagerConfig.GetUseExternalDiffGitConfig()
 	cmdArgs := NewGitCmd("show").
 		Config("diff.noprefix=false").

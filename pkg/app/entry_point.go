@@ -106,7 +106,7 @@ func Start(buildInfo *BuildInfo, integrationTest integrationTypes.IntegrationTes
 	if cliArgs.PrintDefaultConfig {
 		var buf bytes.Buffer
 		encoder := yaml.NewEncoder(&buf)
-		err := encoder.Encode(config.GetDefaultConfig())
+		err := encoder.Encode(config.GetDefaultConfigForPlatform(config.KeybindingPlatform()))
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -164,6 +164,15 @@ func Start(buildInfo *BuildInfo, integrationTest integrationTypes.IntegrationTes
 
 	if cliArgs.PortraitMode != "" {
 		appConfig.SetPortraitModeOverride(cliArgs.PortraitMode)
+	}
+
+	// The restricted modes are expressed as a side panel set: staging mode keeps
+	// only the files panel, diff mode drops the side column entirely.
+	switch cliArgs.Mode {
+	case appTypes.ModeStagingValue:
+		appConfig.SetSidePanelsOverride([]config.SidePanel{{"files"}})
+	case appTypes.ModeDiffValue:
+		appConfig.SetSidePanelsOverride([]config.SidePanel{})
 	}
 
 	if integrationTest != nil {

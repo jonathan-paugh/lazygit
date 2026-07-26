@@ -30,13 +30,13 @@ func NewContextLinesController(
 func (self *ContextLinesController) GetKeybindings(opts types.KeybindingsOpts) []*types.Binding {
 	bindings := []*types.Binding{
 		{
-			Key:         opts.GetKey(opts.Config.Universal.IncreaseContextInDiffView),
+			Keys:        opts.GetKeys(opts.Config.Universal.IncreaseContextInDiffView),
 			Handler:     self.Increase,
 			Description: self.c.Tr.IncreaseContextInDiffView,
 			Tooltip:     self.c.Tr.IncreaseContextInDiffViewTooltip,
 		},
 		{
-			Key:         opts.GetKey(opts.Config.Universal.DecreaseContextInDiffView),
+			Keys:        opts.GetKeys(opts.Config.Universal.DecreaseContextInDiffView),
 			Handler:     self.Decrease,
 			Description: self.c.Tr.DecreaseContextInDiffView,
 			Tooltip:     self.c.Tr.DecreaseContextInDiffViewTooltip,
@@ -75,7 +75,7 @@ func (self *ContextLinesController) Decrease() error {
 func (self *ContextLinesController) applyChange() error {
 	self.c.Toast(fmt.Sprintf(self.c.Tr.DiffContextSizeChanged, self.c.UserConfig().Git.DiffContextSize))
 
-	currentContext := self.currentSidePanel()
+	currentContext := self.c.Context().CurrentSide()
 	switch currentContext.GetKey() {
 	// we make an exception for our staging and patch building contexts because they actually need to refresh their state afterwards.
 	case context.PATCH_BUILDING_MAIN_CONTEXT_KEY:
@@ -94,16 +94,4 @@ func (self *ContextLinesController) checkCanChangeContext() error {
 	}
 
 	return nil
-}
-
-func (self *ContextLinesController) currentSidePanel() types.Context {
-	currentContext := self.c.Context().CurrentStatic()
-	if currentContext.GetKey() == context.NORMAL_MAIN_CONTEXT_KEY ||
-		currentContext.GetKey() == context.NORMAL_SECONDARY_CONTEXT_KEY {
-		if sidePanelContext := self.c.Context().NextInStack(currentContext); sidePanelContext != nil {
-			return sidePanelContext
-		}
-	}
-
-	return currentContext
 }
