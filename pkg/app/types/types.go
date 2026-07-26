@@ -32,8 +32,10 @@ const (
 	GitArgStash  GitArg = "stash"
 )
 
-const ModeStagingValue = "staging"
-const ModeDiffValue = "diff"
+const (
+	ModeStagingValue = "staging"
+	ModeDiffValue    = "diff"
+)
 
 func NewStartArgs(filterPath string, gitArg GitArg, screenMode string, mode string, diffFile string, diffPatch string, test integrationTypes.IntegrationTest) StartArgs {
 	return StartArgs{

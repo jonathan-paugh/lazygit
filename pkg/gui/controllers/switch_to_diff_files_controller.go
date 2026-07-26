@@ -40,7 +40,7 @@ func NewSwitchToDiffFilesController(
 func (self *SwitchToDiffFilesController) GetKeybindings(opts types.KeybindingsOpts) []*types.Binding {
 	bindings := []*types.Binding{
 		{
-			Key:               opts.GetKey(opts.Config.Universal.GoInto),
+			Keys:              opts.GetKeys(opts.Config.Universal.GoInto),
 			Handler:           self.enter,
 			GetDisabledReason: self.canEnter,
 			Description:       self.c.Tr.ViewItemFiles,
@@ -54,7 +54,7 @@ func (self *SwitchToDiffFilesController) Context() types.Context {
 	return self.context
 }
 
-func (self *SwitchToDiffFilesController) GetOnClick() func() error {
+func (self *SwitchToDiffFilesController) GetOnDoubleClick() func() error {
 	return func() error {
 		if self.canEnter() == nil {
 			return self.enter()
@@ -90,18 +90,19 @@ func (self *SwitchToDiffFilesController) enter() error {
 
 	self.c.Refresh(types.RefreshOptions{
 		Scope: []types.RefreshableView{types.COMMIT_FILES},
+		Then: func() error {
+			if filterPath := self.c.Modes().Filtering.GetPath(); filterPath != "" {
+				path, err := filepath.Rel(self.c.Git().RepoPaths.RepoPath(), filterPath)
+				if err != nil {
+					path = filterPath
+				}
+				commitFilesContext.CommitFileTreeViewModel.SelectPath(
+					filepath.ToSlash(path), self.c.UserConfig().Gui.ShowRootItemInFileTree)
+			}
+			self.c.Context().Push(commitFilesContext, types.OnFocusOpts{})
+			return nil
+		},
 	})
-
-	if filterPath := self.c.Modes().Filtering.GetPath(); filterPath != "" {
-		path, err := filepath.Rel(self.c.Git().RepoPaths.RepoPath(), filterPath)
-		if err != nil {
-			path = filterPath
-		}
-		commitFilesContext.CommitFileTreeViewModel.SelectPath(
-			filepath.ToSlash(path), self.c.UserConfig().Gui.ShowRootItemInFileTree)
-	}
-
-	self.c.Context().Push(commitFilesContext, types.OnFocusOpts{})
 	return nil
 }
 

@@ -13,9 +13,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/jesseduffield/gocui"
 	"github.com/jesseduffield/lazycore/pkg/boxlayout"
 	appTypes "github.com/jesseduffield/lazygit/pkg/app/types"
 	"github.com/jesseduffield/lazygit/pkg/commands"
@@ -25,14 +25,14 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/commands/oscommands"
 	"github.com/jesseduffield/lazygit/pkg/common"
 	"github.com/jesseduffield/lazygit/pkg/config"
+	"github.com/jesseduffield/lazygit/pkg/gocui"
 	"github.com/jesseduffield/lazygit/pkg/gui/context"
 	"github.com/jesseduffield/lazygit/pkg/gui/controllers/helpers"
-	"github.com/jesseduffield/lazygit/pkg/gui/keybindings"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/cherrypicking"
+	"github.com/jesseduffield/lazygit/pkg/gui/modes/diff_mode"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/diffing"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/filtering"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/marked_base_commit"
-	"github.com/jesseduffield/lazygit/pkg/gui/modes/diff_mode"
 	"github.com/jesseduffield/lazygit/pkg/gui/modes/staging_mode"
 	"github.com/jesseduffield/lazygit/pkg/gui/popup"
 	"github.com/jesseduffield/lazygit/pkg/gui/presentation"
@@ -52,7 +52,6 @@ import (
 	"github.com/jesseduffield/lazygit/pkg/utils"
 	"github.com/samber/lo"
 	"github.com/sasha-s/go-deadlock"
-	"gopkg.in/ozeidan/fuzzy-patricia.v3/patricia"
 )
 
 const StartupPopupVersion = 5
@@ -89,7 +88,7 @@ type Gui struct {
 	// holds a mapping of view names to ptmx's. This is for rendering command outputs
 	// from within a pty. The point of keeping track of them is so that if we re-size
 	// the window, we can tell the pty it needs to resize accordingly.
-	viewPtmxMap map[string]*os.File
+	viewPtmxMap map[string]oscommands.Pty
 	stopChan    chan struct{}
 
 	// when lazygit is opened outside a git directory we want to open to the most
@@ -121,7 +120,10 @@ type Gui struct {
 
 	PopupHandler types.IPopupHandler
 
-	IsRefreshingFiles bool
+	// Bumped every time we switch to a different repository (in resetState).
+	// Used to drop refresh results that were computed for a repo we've since
+	// navigated away from. See RefreshHelper.onUIThreadUnlessRepoChanged.
+	repoGeneration atomic.Int32
 
 	// we use this to decide whether we'll return to the original directory that
 	// lazygit was opened in, or if we'll retain the one we're currently in.
@@ -181,16 +183,12 @@ func (self *StateAccessor) GetRepoState() types.IRepoStateAccessor {
 	return self.gui.State
 }
 
+func (self *StateAccessor) GetRepoGeneration() int {
+	return int(self.gui.repoGeneration.Load())
+}
+
 func (self *StateAccessor) GetPagerConfig() *config.PagerConfig {
 	return self.gui.pagerConfig
-}
-
-func (self *StateAccessor) GetIsRefreshingFiles() bool {
-	return self.gui.IsRefreshingFiles
-}
-
-func (self *StateAccessor) SetIsRefreshingFiles(value bool) {
-	self.gui.IsRefreshingFiles = value
 }
 
 func (self *StateAccessor) GetShowExtrasWindow() bool {
@@ -244,8 +242,11 @@ type GuiRepoState struct {
 
 	SplitMainPanel bool
 
-	SearchState  *types.SearchState
-	StartupStage types.StartupStage // Allows us to not load everything at once
+	SearchState *types.SearchState
+	// Lets us not load everything at once. Written and read from refresh
+	// workers (the reflog/branches load transitions it INITIAL->COMPLETE), so
+	// it's atomic. Holds a types.StartupStage.
+	startupStage atomic.Int32
 
 	ContextMgr *ContextMgr
 	Contexts   *context.ContextTree
@@ -265,6 +266,18 @@ type GuiRepoState struct {
 	CurrentPopupOpts *types.CreatePopupPanelOpts
 
 	LastBackgroundFetchTime time.Time
+
+	// Whether the rebase/merge/cherry-pick/revert that's currently in progress
+	// was started from within lazygit (as opposed to being started externally,
+	// e.g. in another terminal or by a coding agent). We only auto-prompt to
+	// continue such an operation once its conflicts are resolved if we started
+	// it ourselves; for an externally started one, popping up unbidden would be
+	// confusing. Reset whenever we observe that no operation is in progress.
+	//
+	// Written from both the files refresh worker and the merge/rebase result
+	// path (which runs on a worker for the async callers), and read from the
+	// files refresh worker, so it's atomic.
+	mergeOrRebaseStartedInLazygit atomic.Bool
 }
 
 var _ types.IRepoStateAccessor = new(GuiRepoState)
@@ -278,11 +291,11 @@ func (self *GuiRepoState) GetWindowViewNameMap() *utils.ThreadSafeMap[string, st
 }
 
 func (self *GuiRepoState) GetStartupStage() types.StartupStage {
-	return self.StartupStage
+	return types.StartupStage(self.startupStage.Load())
 }
 
 func (self *GuiRepoState) SetStartupStage(value types.StartupStage) {
-	self.StartupStage = value
+	self.startupStage.Store(int32(value))
 }
 
 func (self *GuiRepoState) GetCurrentPopupOpts() *types.CreatePopupPanelOpts {
@@ -291,6 +304,14 @@ func (self *GuiRepoState) GetCurrentPopupOpts() *types.CreatePopupPanelOpts {
 
 func (self *GuiRepoState) SetCurrentPopupOpts(value *types.CreatePopupPanelOpts) {
 	self.CurrentPopupOpts = value
+}
+
+func (self *GuiRepoState) GetMergeOrRebaseStartedInLazygit() bool {
+	return self.mergeOrRebaseStartedInLazygit.Load()
+}
+
+func (self *GuiRepoState) SetMergeOrRebaseStartedInLazygit(value bool) {
+	self.mergeOrRebaseStartedInLazygit.Store(value)
 }
 
 func (self *GuiRepoState) GetScreenMode() types.ScreenMode {
@@ -367,6 +388,7 @@ func (gui *Gui) onNewRepo(startArgs appTypes.StartArgs, contextKey types.Context
 			if didChange && reloadErr == nil {
 				gui.c.Log.Info("User config changed - reloading")
 				reloadErr = gui.onUserConfigLoaded()
+				gui.reloadSidePanels()
 				if err := gui.resetKeybindings(); err != nil {
 					return err
 				}
@@ -377,7 +399,7 @@ func (gui *Gui) onNewRepo(startArgs appTypes.StartArgs, contextKey types.Context
 			}
 
 			gui.c.Log.Info("Receiving focus - refreshing")
-			gui.helpers.Refresh.Refresh(types.RefreshOptions{Mode: types.ASYNC})
+			gui.helpers.Refresh.Refresh(types.RefreshOptions{DontBlockRepoSwitch: true})
 			return reloadErr
 		}
 
@@ -407,6 +429,28 @@ func (gui *Gui) onNewRepo(startArgs appTypes.StartArgs, contextKey types.Context
 		return nil
 	})
 
+	gui.g.SetUpdateQueueHighWaterMarkHandler(func(depth int) {
+		gui.c.Log.Infof("User-event queue reached a new high-water mark: %d", depth)
+	})
+
+	gui.g.SetOnSelectSearchResultFunc(func(v *gocui.View, selectedLineIdx int) {
+		ctx, ok := gui.helpers.View.ContextForView(v.Name())
+		if ok {
+			if searchableContext, ok := ctx.(types.ISearchableContext); ok {
+				searchableContext.OnSearchSelect(selectedLineIdx)
+			}
+		}
+	})
+
+	gui.g.SetRenderSearchStatusFunc(func(v *gocui.View, index int, total int) {
+		ctx, ok := gui.helpers.View.ContextForView(v.Name())
+		if ok {
+			if searchableContext, ok := ctx.(types.ISearchableContext); ok {
+				searchableContext.RenderSearchStatus(index, total)
+			}
+		}
+	})
+
 	// if a context key has been given, push that instead, and set its index to 0
 	if contextKey != context.NO_CONTEXT {
 		contextToPush = gui.c.ContextForKey(contextKey)
@@ -424,17 +468,19 @@ func (gui *Gui) onNewRepo(startArgs appTypes.StartArgs, contextKey types.Context
 		// Defer rendering until after layout so the view has correct dimensions
 		// for scrollbar calculation
 		gui.afterLayout(func() error {
-			gui.renderDiffModeContent(startArgs)
+			gui.renderDiffModeContent()
 			return nil
 		})
 	} else {
 		gui.c.Context().Push(contextToPush, types.OnFocusOpts{})
 	}
 
+	gui.render()
+
 	return nil
 }
 
-func (gui *Gui) renderDiffModeContent(startArgs appTypes.StartArgs) {
+func (gui *Gui) renderDiffModeContent() {
 	diffMode := gui.State.Modes.DiffMode
 	repoName := gui.git.RepoPaths.RepoName()
 
@@ -454,23 +500,73 @@ func (gui *Gui) renderDiffModeContent(startArgs appTypes.StartArgs) {
 		return
 	}
 
-	// Build the git diff command
-	cmdArgs := []string{"diff", "--color=always"}
+	filePath := diffMode.FilePath()
 	title := fmt.Sprintf("Diff (%s)", repoName)
-
 	if diffMode.IsFileMode() {
-		cmdArgs = append(cmdArgs, "--", diffMode.FilePath())
-		title = fmt.Sprintf("Diff (%s): %s", repoName, diffMode.FilePath())
+		title = fmt.Sprintf("Diff (%s): %s", repoName, filePath)
 	}
 
-	cmd := exec.Command("git", cmdArgs...)
+	content, err := gui.diffModeDiff(filePath)
+	if err != nil {
+		gui.c.ErrorToast(fmt.Sprintf("Failed to produce diff: %v", err))
+		return
+	}
+
+	if strings.TrimSpace(content) == "" {
+		if filePath != "" {
+			content = utils.ResolvePlaceholderString(
+				gui.c.Tr.DiffModeNoChangesForFile,
+				map[string]string{"path": filePath},
+			)
+		} else {
+			content = gui.c.Tr.DiffModeNoChanges
+		}
+	}
+
 	gui.c.RenderToMainViews(types.RefreshMainOpts{
 		Pair: gui.c.MainViewPairs().Normal,
 		Main: &types.ViewUpdateOpts{
 			Title: title,
-			Task:  types.NewRunPtyTask(cmd),
+			Task:  types.NewRenderStringTask(content),
 		},
 	})
+}
+
+// diffModeDiff produces the diff shown in diff mode. It diffs against HEAD so
+// that staged changes are included, and compares against /dev/null for
+// untracked files, which git otherwise refuses to diff at all.
+func (gui *Gui) diffModeDiff(filePath string) (string, error) {
+	if filePath != "" {
+		if _, err := os.Stat(filePath); err == nil && gitFileIsUntracked(filePath) {
+			// --no-index exits non-zero purely to signal "files differ", so the
+			// error is discarded and the output used as-is.
+			output, _ := exec.Command("git", "diff", "--color=always", "--no-index", os.DevNull, filePath).Output()
+			return string(output), nil
+		}
+	}
+
+	cmdArgs := []string{"diff", "--color=always"}
+	if gitRepoHasCommits() {
+		cmdArgs = []string{"diff", "HEAD", "--color=always"}
+	}
+	if filePath != "" {
+		cmdArgs = append(cmdArgs, "--", filePath)
+	}
+
+	output, err := exec.Command("git", cmdArgs...).Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(output), nil
+}
+
+func gitFileIsUntracked(filePath string) bool {
+	return exec.Command("git", "ls-files", "--error-unmatch", "--", filePath).Run() != nil
+}
+
+func gitRepoHasCommits() bool {
+	return exec.Command("git", "rev-parse", "--verify", "--quiet", "HEAD").Run() == nil
 }
 
 func (gui *Gui) getPerRepoConfigFiles() []*config.ConfigFile {
@@ -512,9 +608,16 @@ func (gui *Gui) onUserConfigLoaded() error {
 	gui.setColorScheme()
 	gui.configureViewProperties()
 
-	gui.g.SearchEscapeKey = keybindings.GetKey(userConfig.Keybinding.Universal.Return)
-	gui.g.NextSearchMatchKey = keybindings.GetKey(userConfig.Keybinding.Universal.NextMatch)
-	gui.g.PrevSearchMatchKey = keybindings.GetKey(userConfig.Keybinding.Universal.PrevMatch)
+	gui.g.SearchEscapeKeys = config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.Return)
+	gui.g.NextSearchMatchKeys = config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.NextMatch)
+	gui.g.PrevSearchMatchKeys = config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.PrevMatch)
+
+	gui.g.SetEditKeybindings(
+		config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.MoveWordLeft),
+		config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.MoveWordRight),
+		config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.BackspaceWord),
+		config.GetValidatedKeyBindingKeys(userConfig.Keybinding.Universal.ForwardDeleteWord),
+	)
 
 	gui.g.ShowListFooter = userConfig.Gui.ShowListFooter
 
@@ -530,6 +633,8 @@ func (gui *Gui) onUserConfigLoaded() error {
 		icons.SetNerdFontsVersion(userConfig.Gui.NerdFontsVersion)
 	} else if userConfig.Gui.ShowIcons {
 		icons.SetNerdFontsVersion("2")
+	} else {
+		icons.SetNerdFontsVersion("")
 	}
 
 	if len(userConfig.Gui.BranchColorPatterns) > 0 {
@@ -546,8 +651,10 @@ func (gui *Gui) checkForChangedConfigsThatDontAutoReload(oldConfig *config.UserC
 	configsThatDontAutoReload := []string{
 		"Git.AutoFetch",
 		"Git.AutoRefresh",
+		"Git.AutoDetectExternalChanges",
 		"Refresher.RefreshInterval",
 		"Refresher.FetchInterval",
+		"Refresher.ExternalChangeCheckInterval",
 		"Update.Method",
 		"Update.Days",
 	}
@@ -597,6 +704,11 @@ func (gui *Gui) checkForChangedConfigsThatDontAutoReload(oldConfig *config.UserC
 // resetState reuses the repo state from our repo state map, if the repo was
 // open before; otherwise it creates a new one.
 func (gui *Gui) resetState(startArgs appTypes.StartArgs) types.Context {
+	// Bump the repo generation so that any refresh still in flight for the
+	// previous repo drops its model update instead of applying it here (see
+	// RefreshHelper.onUIThreadUnlessRepoChanged).
+	gui.repoGeneration.Add(1)
+
 	// Un-highlight the current view if there is one. The reason we do this is
 	// that the repo we are switching to might have a different view focused,
 	// and would then show an inactive highlight for the previous view.
@@ -610,14 +722,13 @@ func (gui *Gui) resetState(startArgs appTypes.StartArgs) types.Context {
 		gui.State = state
 		gui.State.ViewsSetup = false
 
-		contextTree := gui.State.Contexts
-		gui.State.WindowViewNameMap = initialWindowViewNameMap(contextTree)
+		// The repo we're switching to may have a per-repo config with a different
+		// side panel layout, so re-apply it to this repo's contexts.
+		gui.applySidePanelConfig()
 
 		// setting this to nil so we don't get stuck based on a popup that was
 		// previously opened
-		gui.Mutexes.PopupMutex.Lock()
 		gui.State.CurrentPopupOpts = nil
-		gui.Mutexes.PopupMutex.Unlock()
 
 		return gui.c.Context().Current()
 	}
@@ -636,10 +747,11 @@ func (gui *Gui) resetState(startArgs appTypes.StartArgs) types.Context {
 			FilteredReflogCommits: make([]*models.Commit, 0),
 			ReflogCommits:         make([]*models.Commit, 0),
 			BisectInfo:            git_commands.NewNullBisectInfo(),
-			FilesTrie:             patricia.NewTrie(),
 			Authors:               map[string]*models.Author{},
 			MainBranches:          git_commands.NewMainBranches(gui.c.Common, gui.os.Cmd),
 			HashPool:              &utils.StringPool{},
+			PullRequests:          gui.loadCachedPullRequests(),
+			PullRequestsMap:       make(map[string]*models.GithubPullRequest),
 		},
 		Modes: &types.Modes{
 			Filtering:        filtering.New(startArgs.FilterPath, ""),
@@ -651,15 +763,34 @@ func (gui *Gui) resetState(startArgs appTypes.StartArgs) types.Context {
 		},
 		ScreenMode: initialScreenMode,
 		// TODO: only use contexts from context manager
-		ContextMgr:        NewContextMgr(gui, contextTree),
-		Contexts:          contextTree,
-		WindowViewNameMap: initialWindowViewNameMap(contextTree),
-		SearchState:       types.NewSearchState(),
+		ContextMgr:  NewContextMgr(gui, contextTree),
+		Contexts:    contextTree,
+		SearchState: types.NewSearchState(),
 	}
 
 	gui.RepoStateMap[Repo(worktreePath)] = gui.State
 
+	gui.applySidePanelConfig()
+
 	return initialContext(contextTree, startArgs)
+}
+
+func (gui *Gui) loadCachedPullRequests() []*models.GithubPullRequest {
+	repoPath := gui.git.RepoPaths.RepoPath()
+	cachedPRs := gui.c.GetAppState().GithubPullRequests[repoPath]
+
+	return lo.Map(cachedPRs, func(cached config.CachedPullRequest, _ int) *models.GithubPullRequest {
+		return &models.GithubPullRequest{
+			HeadRefName: cached.HeadRefName,
+			Number:      cached.Number,
+			Title:       cached.Title,
+			State:       cached.State,
+			Url:         cached.Url,
+			HeadRepositoryOwner: models.GithubRepositoryOwner{
+				Login: cached.HeadRepositoryOwner,
+			},
+		}
+	})
 }
 
 func (gui *Gui) getViewBufferManagerForView(view *gocui.View) *tasks.ViewBufferManager {
@@ -671,11 +802,34 @@ func (gui *Gui) getViewBufferManagerForView(view *gocui.View) *tasks.ViewBufferM
 	return manager
 }
 
-func initialWindowViewNameMap(contextTree *context.ContextTree) *utils.ThreadSafeMap[string, string] {
+// When scrolling a lazy-loaded view, we read enough lines to fill the viewport
+// plus this many extra screenfuls, so that further scrolling has some runway
+// and doesn't have to block on reading (and re-rendering) more lines on every
+// wheel notch.
+const scrollReadAheadScreenfuls = 3
+
+// readLinesToFillView reads enough lines into the view's buffer to cover
+// everything currently scrolled into view, plus a few screenfuls of read-ahead.
+// Reading is idempotent (see ViewBufferManager.ReadLines), so if the buffer
+// already extends far enough this does nothing.
+func (gui *Gui) readLinesToFillView(view *gocui.View) {
+	if manager := gui.getViewBufferManagerForView(view); manager != nil {
+		viewportBottom := view.OriginY() + view.InnerHeight()
+		manager.ReadLines(viewportBottom + scrollReadAheadScreenfuls*view.InnerHeight())
+	}
+}
+
+func (gui *Gui) initialWindowViewNameMap(contextTree *context.ContextTree) *utils.ThreadSafeMap[string, string] {
 	result := utils.NewThreadSafeMap[string, string]()
 
 	for _, context := range contextTree.Flatten() {
 		result.Set(context.GetWindowName(), context.GetViewName())
+	}
+
+	// A side panel's window shows its first configured tab by default, which is
+	// not necessarily the context that won the loop above.
+	for _, panel := range gui.c.UserConfig().Gui.SidePanels {
+		result.Set(panel[0], sidePanelViewNames[panel[0]])
 	}
 
 	return result
@@ -747,7 +901,7 @@ func NewGui(
 		Updater:              updater,
 		statusManager:        status.NewStatusManager(),
 		viewBufferManagerMap: map[string]*tasks.ViewBufferManager{},
-		viewPtmxMap:          map[string]*os.File{},
+		viewPtmxMap:          map[string]oscommands.Pty{},
 		showRecentRepos:      showRecentRepos,
 		RepoPathStack:        &utils.StringStack{},
 		RepoStateMap:         map[Repo]*GuiRepoState{},
@@ -765,16 +919,28 @@ func NewGui(
 
 	gui.PopupHandler = popup.NewPopupHandler(
 		cmn,
+		// Raising a popup or menu pushes a context and mutates the popup views,
+		// and it can be triggered from a worker goroutine (e.g. a
+		// WithWaitingStatus handler that hits a merge conflict and asks the user
+		// how to proceed). Bounce the creation onto the UI thread so it can't
+		// race the layout/draw code. Doing it here, at the one point where these
+		// producers are injected, keeps every caller oblivious to the threading.
 		func(ctx goContext.Context, opts types.CreatePopupPanelOpts) {
-			gui.helpers.Confirmation.CreatePopupPanel(ctx, opts)
+			gui.onUIThread(func() error {
+				gui.helpers.Confirmation.CreatePopupPanel(ctx, opts)
+				return nil
+			})
 		},
-		func() error { gui.c.Refresh(types.RefreshOptions{Mode: types.ASYNC}); return nil },
+		func() error { gui.c.Refresh(types.RefreshOptions{}); return nil },
 		func() { gui.State.ContextMgr.Pop() },
 		func() types.Context { return gui.State.ContextMgr.Current() },
-		gui.createMenu,
+		func(opts types.CreateMenuOptions) error {
+			gui.onUIThread(func() error { return gui.createMenu(opts) })
+			return nil
+		},
 		func(message string, f func(gocui.Task) error) { gui.helpers.AppStatus.WithWaitingStatus(message, f) },
-		func(message string, f func() error) error {
-			return gui.helpers.AppStatus.WithWaitingStatusSync(message, f)
+		func(message string, f func(gocui.Task) error) {
+			gui.helpers.AppStatus.WithWaitingStatusBlockingInput(message, f)
 		},
 		func(message string, kind types.ToastKind) { gui.helpers.AppStatus.Toast(message, kind) },
 		func() string { return gui.Views.Prompt.TextArea.GetContent() },
@@ -847,58 +1013,22 @@ func (gui *Gui) initGocui(headless bool, test integrationTypes.IntegrationTest) 
 }
 
 func (gui *Gui) viewTabMap() map[string][]context.TabView {
-	result := map[string][]context.TabView{
-		"branches": {
-			{
-				Tab:      gui.c.Tr.LocalBranchesTitle,
-				ViewName: "localBranches",
-			},
-			{
-				Tab:      gui.c.Tr.RemotesTitle,
-				ViewName: "remotes",
-			},
-			{
-				Tab:      gui.c.Tr.TagsTitle,
-				ViewName: "tags",
-			},
-		},
-		"commits": {
-			{
-				Tab:      gui.c.Tr.CommitsTitle,
-				ViewName: "commits",
-			},
-			{
-				Tab:      gui.c.Tr.ReflogCommitsTitle,
-				ViewName: "reflogCommits",
-			},
-		},
-		"files": gui.filesTabViews(),
+	titles := gui.sidePanelTabTitles()
+	result := map[string][]context.TabView{}
+	for _, panel := range gui.c.UserConfig().Gui.SidePanels {
+		if len(panel) < 2 {
+			// A single-tab panel shows its view's own title, not a tab strip.
+			continue
+		}
+		result[panel[0]] = lo.Map(panel, func(name string, _ int) context.TabView {
+			return context.TabView{
+				Tab:      titles[name],
+				ViewName: sidePanelViewNames[name],
+			}
+		})
 	}
 
 	return result
-}
-
-func (gui *Gui) filesTabViews() []context.TabView {
-	filesTab := context.TabView{
-		Tab:      gui.c.Tr.FilesTitle,
-		ViewName: "files",
-	}
-
-	if gui.InStagingMode {
-		return []context.TabView{filesTab}
-	}
-
-	return []context.TabView{
-		filesTab,
-		{
-			Tab:      gui.c.Tr.WorktreesTitle,
-			ViewName: "worktrees",
-		},
-		{
-			Tab:      gui.c.Tr.SubmodulesTitle,
-			ViewName: "submodules",
-		},
-	}
 }
 
 // Run: setup the gui with keybindings and start the mainloop
@@ -916,7 +1046,7 @@ func (gui *Gui) Run(startArgs appTypes.StartArgs) error {
 
 	g.ErrorHandler = gui.PopupHandler.ErrorHandler
 
-	gui.g.ShouldHandleMouseEvent = func(view *gocui.View, key gocui.Key) bool {
+	gui.g.ShouldHandleMouseEvent = func(view *gocui.View, key gocui.KeyName) bool {
 		if gui.helpers.Confirmation.IsPopupPanelFocused() && gui.currentViewName() != view.Name() &&
 			!gocui.IsMouseScrollKey(key) {
 			// we ignore click events on views that aren't popup panels, when a popup panel is focused.
@@ -969,7 +1099,12 @@ func (gui *Gui) Run(startArgs appTypes.StartArgs) error {
 	// setting here so we can use it in layout.go
 	gui.integrationTest = startArgs.IntegrationTest
 
-	return gui.g.MainLoop()
+	err = gui.g.MainLoop()
+	if errors.Is(err, gocui.ErrQuit) {
+		// Give the focused context a chance to clean up before we tear down the app.
+		gui.c.Context().Current().HandleQuit()
+	}
+	return err
 }
 
 func (gui *Gui) RunAndHandleError(startArgs appTypes.StartArgs) error {
@@ -1010,7 +1145,7 @@ func (gui *Gui) runSubprocessWithSuspenseAndRefresh(subprocess *oscommands.CmdOb
 		return err
 	}
 
-	gui.c.Refresh(types.RefreshOptions{Mode: types.ASYNC})
+	gui.c.Refresh(types.RefreshOptions{DontBlockRepoSwitch: true})
 
 	return nil
 }
@@ -1082,12 +1217,31 @@ func (gui *Gui) runSubprocess(cmdObj *oscommands.CmdObj) error {
 	return err
 }
 
+var isFirstRefreshAfterStartup = true
+
 func (gui *Gui) loadNewRepo() error {
 	if err := gui.updateRecentRepoList(); err != nil {
 		return err
 	}
 
-	gui.c.Refresh(types.RefreshOptions{Mode: types.ASYNC})
+	// On startup we don't want to block input during the initial refresh (it
+	// should be possible to press, say, `4` to jump to the commits panel right
+	// after startup without a delay), and we also want panels to show their
+	// contents as soon as possible; it doesn't matter so much that it's not in
+	// sync, we go from empty to populated here. However, when switching repos
+	// it can be confusing that some panels that are slow to update still show
+	// the old repo's data while others already show the new one's data, so
+	// update the UI only when everything is ready, and also block input to
+	// prevent accidentally trying to act on the old, stale data.
+	options := types.RefreshOptions{DontBlockRepoSwitch: true}
+	refresh := gui.c.Refresh
+	if isFirstRefreshAfterStartup {
+		isFirstRefreshAfterStartup = false
+	} else {
+		options.BatchUIUpdates = true
+		refresh = gui.c.RefreshBlockingInput
+	}
+	refresh(options)
 
 	if err := gui.os.UpdateWindowTitle(); err != nil {
 		return err
@@ -1110,7 +1264,7 @@ func (gui *Gui) showIntroPopupMessage() {
 		introMessage := utils.ResolvePlaceholderString(
 			gui.c.Tr.IntroPopupMessage,
 			map[string]string{
-				"confirmationKey": gui.c.UserConfig().Keybinding.Universal.Confirm,
+				"confirmationKey": gui.c.UserConfig().Keybinding.Universal.Confirm.String(),
 			},
 		)
 
@@ -1209,8 +1363,30 @@ func (gui *Gui) onUIThread(f func() error) {
 	})
 }
 
+func (gui *Gui) onUIThreadBackground(f func() error) {
+	gui.g.UpdateBackground(func(*gocui.Gui) error {
+		return f()
+	})
+}
+
+func (gui *Gui) onUIThreadContentOnly(f func() error) {
+	gui.g.UpdateContentOnly(func(*gocui.Gui) error {
+		return f()
+	})
+}
+
+func (gui *Gui) onUIThreadContentOnlyBackground(f func() error) {
+	gui.g.UpdateContentOnlyBackground(func(*gocui.Gui) error {
+		return f()
+	})
+}
+
 func (gui *Gui) onWorker(f func(gocui.Task) error) {
 	gui.g.OnWorker(f)
+}
+
+func (gui *Gui) onWorkerBackground(f func(gocui.Task) error) {
+	gui.g.OnWorkerBackground(f)
 }
 
 func (gui *Gui) getWindowDimensions(informationStr string, appStatus string) map[string]boxlayout.Dimensions {
