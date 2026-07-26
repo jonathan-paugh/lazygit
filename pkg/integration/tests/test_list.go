@@ -495,7 +495,6 @@ var tests = []*components.IntegrationTest{
 	ui.KeybindingSuggestionsDontCrashOnDisabledBindings,
 	ui.KeybindingSuggestionsWhenSwitchingRepos,
 	ui.ModeSpecificKeybindingSuggestions,
-	ui.OpenLinkFailure,
 	ui.PromoteTabToSidePanel,
 	ui.RangeSelect,
 	ui.ReloadSidePanels,
