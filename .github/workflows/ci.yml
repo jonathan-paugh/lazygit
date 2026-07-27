@@ -199,7 +199,11 @@ jobs:
   upload-coverage:
     # List all jobs that produce coverage files
     needs: [unit-tests, integration-tests]
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # The upload needs a Codacy token that only upstream holds. The second
+    # condition alone is satisfied by a pull request raised within a fork, since
+    # both sides are then the same repository, so the job would run there and
+    # fail on the missing secret.
+    if: ${{ github.repository == 'jesseduffield/lazygit' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

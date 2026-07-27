@@ -7,6 +7,9 @@ on:
 jobs:
   check-required-label:
     runs-on: ubuntu-latest
+    # These labels drive upstream's release notes, so the check is meaningless on
+    # a fork and would fail every pull request opened against one.
+    if: ${{ github.repository == 'jesseduffield/lazygit' }}
     steps:
       - uses: mheap/github-action-required-labels@0ac283b4e65c1fb28ce6079dea5546ceca98ccbe # v5
         with:
